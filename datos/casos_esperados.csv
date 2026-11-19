@@ -1,0 +1,31 @@
+ID,Registros,Criterio,Resultado_esperado
+A01,910005391,Buscar ID de pago en maestro,Pago sin proveedor maestro
+A02,59508890,Comparar RFC en pagos y maestro para ID existente,Un RFC discrepante sembrado
+A03,19036372,Comparar SITE por proveedor,Sitio discrepante
+A04,39018941,Comparar dígitos de las cuentas conservando ceros iniciales,Cuenta discrepante
+A05,"59601, 67131",Agrupar cuenta del maestro por IDs distintos,Dos proveedores comparten cuenta
+A06,"42488086, 55387698",Fecha de pago estrictamente posterior a la inactivación,Primer ID sin alerta y segundo ID con alerta
+A07,"96290472, 59782372",Fecha de pago estrictamente posterior a la inactivación,Primer ID sin alerta y segundo ID con alerta
+A08,"99189871, 85135529",Fecha de pago estrictamente posterior a la inactivación,Primer ID sin alerta y segundo ID con alerta
+A09,"18429202, 910005392","Agrupar por VENDOR_ID, NUM_FACTURA, SEGMENT1 e IMPORTE_AP",Dos pagos en el mismo grupo
+A10,"77008489, 69273088",Agrupar UUID no vacíos,UUID repetido
+A11,33374660,Buscar UUID vacío,Un UUID vacío sembrado
+A12,65718973,Comparar los importes a dos decimales,Diferencia de 100.00
+A13,23277132,Pago posterior al vencimiento,Atraso presente en el original
+A14,11760881,Pago anterior a la fecha de factura,Pago anterior por un día
+A15,90605639,Buscar FALTA NC sin distinguir mayúsculas,Comentario coincidente
+A16,35097,"Buscar campos vacíos entre RFC, cuenta, banco, correo y teléfono",Correo deliberadamente vacío
+A17,910005393,Entre 0 y 30 días calendario después del alta,Primer pago a los 7 días
+A18,68151305,Entre 0 y 7 días calendario desde la actualización bancaria,Pago a los 3 días
+A19,"910005394, 910005395, 910005396, 910005397",Monto mayor a 3 veces la mediana de al menos 3 pagos anteriores del proveedor y sitio,8.000.000 frente a mediana de 100.000
+A20,22329,"Más del 10 % de PAGADO en toda la muestra, expresado en unidades del extracto",Participación de 11.13%
+A21,12180,Proveedor activo con último pago anterior a 2024-12-01. Corte 2025-12-01,Con historial y sin pagos en los últimos 12 meses
+A21,99000002,Proveedor activo sin pagos observados al corte 2025-12-01,Sin actividad histórica
+A22,910005393,Primer pago observado superior a 500.000 en PAGADO,Primer pago de 850.000
+A23,"910005394, 910005395, 910005396, 910005397",Diciembre de 2025 supera 3 veces el promedio mensual de septiembre a noviembre por proveedor,Incremento mensual del proveedor simulado
+A24,"20MTY, 2025-12",Diciembre de 2025 supera 3 veces el promedio mensual de septiembre a noviembre por SITE,Incremento mensual del SITE
+A25,"73303489, 96254141",Más de un pago por proveedor y día,Múltiples pagos el mismo día
+A26,"910005394, 910005395","Referencia no vacía repetida en documentos y fechas distintos, caso sembrado sin lote justificado",Dos pagos comparten referencia
+A28,"910005394, 910005395, 910005396, 910005397",Fuente o aprobación diferente al patrón de al menos 3 pagos previos del proveedor,Cambian fuente y aprobación
+A29,"910005394, 910005395, 910005396, 910005397",Cuenta contable diferente de la moda de al menos 3 pagos anteriores del proveedor,Cuenta contable distinta al patrón
+A30,"910005398, 910005399","Dos o más pagos del mismo proveedor en hasta 3 días, cada uno entre 90 % y menos de 100 % de 50.000 y suma mayor a 50.000",Dos pagos por debajo de 50.000 que suman 97.500
