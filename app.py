@@ -106,6 +106,11 @@ def main():
     if message:
         st.success(message)
     st.caption(f"Datos simulados · Corte {run.end or 'sin pagos'} · {len(run.rules)} reglas · Ejecución {run.id[:12]}")
+    section = st.sidebar.radio("Área de trabajo", ["Auditoría", "Explorador SQL", "Modelos de anomalías", "Mapper", "Homología persistente", "Validación de casos"])
+    if section != "Auditoría":
+        from analisis import show_analysis
+        show_analysis(run, section)
+        return
     vendors = vendor_options(run)
     cases = store.cases()
     sites = sorted({r["site"] for r in (*run.payments.values(), *run.master.values())} - {""})
@@ -139,8 +144,10 @@ def main():
         "Pagos afectados": f"{affected:,}", "Proveedores afectados": f"{suppliers:,}",
         "Importe afectado": money(total), "Tasa de afectación": f"{affected / payments:.1%}" if payments else "—",
     }
-    for col, (label, value) in zip(st.columns(len(labels)), labels.items()):
-        col.metric(label, value, border=True)
+    indicators = list(labels.items())
+    for group in (indicators[:3], indicators[3:]):
+        for col, (label, value) in zip(st.columns(3), group):
+            col.metric(label, value, border=True)
     st.caption("Importes en unidades del extracto. Cada pago afectado aporta una sola vez al total.")
 
     overview, explorer, catalog = st.tabs(["Resumen", "Explorar alertas", "Matriz de reglas"])
@@ -160,6 +167,14 @@ def main():
             category_counts = {k: v for k, v in counts.items() if category is None or k == category}
             st.bar_chart(pd.Series(category_counts, name="Alertas"), horizontal=True, color="#3982AA")
 
+        st.subheader("Reglas con más hallazgos")
+        rule_counts = Counter(r["rule"] for r in rows)
+        if rule_counts:
+            st.dataframe([{"Regla": code, "Alerta": run.rules[code]["name"],
+                           "Severidad": run.rules[code]["severity"], "Hallazgos": n}
+                          for code, n in rule_counts.most_common(8)], hide_index=True)
+        else:
+            st.caption("Sin hallazgos para la selección.")
     with explorer:
         if not rows:
             st.info("No hay alertas con los filtros seleccionados.")
@@ -169,6 +184,9 @@ def main():
             order_key = {"Fecha": lambda r: r["date"], "Importe": lambda r: r["amount"],
                          "Severidad": lambda r: severity_rank.get(r["severity"], 0)}[order]
             rows.sort(key=lambda r: (order_key(r), r["id"]), reverse=True)
+            exported = pd.DataFrame(rows).rename(columns=COLUMNS)
+            st.download_button("Descargar alertas filtradas", exported.to_csv(index=False).encode("utf-8-sig"),
+                               "alertas_filtradas.csv", "text/csv")
             page = st.number_input("Página", min_value=1, max_value=(len(rows) + 24) // 25, step=1)
             page_rows = rows[(page - 1) * 25:page * 25]
             index = {r["id"]: r for r in page_rows}
