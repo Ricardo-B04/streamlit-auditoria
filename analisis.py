@@ -5,6 +5,7 @@ import plotly.express as px
 import streamlit as st
 from persim import wasserstein
 
+from consultas import MASTERS, QUERIES, execute_queries
 from detectors import RULES, detect
 from mapper_panel import show_mapper
 from ml import MODELS, PROFILES, run_ml
@@ -140,37 +141,72 @@ def validation(run):
     download(cases, "Descargar validación", "validacion.csv")
 
 
+@st.cache_data(max_entries=8)
+def sql_results(run_id, selected, _run):
+    return execute_queries(_run.payments, _run.master, selected)
+
+
+def show_sql(run, payments):
+    st.subheader("Consultas de auditoría")
+    def rule_label(code):
+        return f"{code} · {run.rules[code]['name']}"
+
+    rules = sorted(run.rules)
+    selected = st.multiselect("Reglas para consultar", rules,
+                              default=["A01", "A04", "A05", "A10"], format_func=rule_label)
+    query = st.text_input("Buscar ID, proveedor, cuenta o UUID").strip()
+    only = st.checkbox("Solo registros con alguna regla seleccionada", True)
+    matches = sql_results(run.id, tuple(selected), run)
+    payment_rules = [code for code in selected if code not in MASTERS]
+    master_rules = [code for code in selected if code in MASTERS]
+    suppliers = pd.DataFrame([
+        {"ID proveedor": vid, "Proveedor": row["vendor"], "Sitio": row["site"], "Cuenta": row["account"]}
+        for vid, row in run.master.items()
+    ], columns=["ID proveedor", "Proveedor", "Sitio", "Cuenta"])
+    search_cols = ["INVOICE_ID", "VENDOR_ID", "VENDOR_NAME", "BANK_ACCOUNT_NUM", "UUID"]
+    pay_tab, master_tab, code_tab = st.tabs(["Pagos", "Maestro de proveedores", "Consultas SQL"])
+    with pay_tab:
+        show_sql_table(payments, "INVOICE_ID", search_cols, payment_rules, matches,
+                       query, only, "Pagos", "consultas_pagos.csv")
+    with master_tab:
+        st.caption("A05, A16 y A21 identifican proveedores del maestro. A05 muestra cada proveedor de la cuenta compartida.")
+        show_sql_table(suppliers, "ID proveedor", ["ID proveedor", "Proveedor", "Cuenta"],
+                       master_rules, matches, query, only, "Proveedores", "consultas_maestro.csv")
+    with code_tab:
+        code = st.selectbox("Ver consulta", rules, format_func=rule_label)
+        st.caption("DuckDB ejecuta estas consultas sobre las tablas normalizadas payments y master.")
+        st.code(QUERIES[code], language="sql")
+
+
+def show_sql_table(frame, id_column, search_cols, rules, matches, query, only, label, filename):
+    flags = pd.DataFrame({code: frame[id_column].isin(matches[code]) for code in rules}, index=frame.index)
+    mask = flags.any(axis=1) if only else pd.Series(True, index=frame.index)
+    if query:
+        mask &= frame[search_cols].apply(
+            lambda col: col.fillna("").str.contains(query, case=False, regex=False)).any(axis=1)
+    table = frame.loc[mask].join(flags)
+    if rules:
+        table["Reglas cumplidas"] = [
+            ", ".join(row.index[row]) for _, row in flags.loc[mask].iterrows()
+        ]
+    st.metric(f"{label} en la selección", len(table))
+    st.dataframe(table, hide_index=True)
+    download(table, f"Descargar {label.lower()}", filename)
+
+
 def show_analysis(run, section):
     if section == "Validación de casos":
         validation(run)
         return
     payments, audit_flags, flags = extract(run.id, run)
     st.caption(f"Análisis sobre el extracto completo · {len(payments):,} pagos")
-    if payments.empty:
+    if section == "Explorador SQL":
+        show_sql(run, payments)
+    elif payments.empty:
         st.info("La ejecución no contiene pagos.")
-    elif section == "Explorador SQL":
-        st.subheader("Conciliación de pagos")
-        selected = st.multiselect("Señales SQL de Topo", list(RULES), default=list(RULES),
-                                  format_func=lambda key: RULES[key][0])
-        only = st.checkbox("Solo pagos con alguna señal seleccionada", True)
-        query = st.text_input("Buscar ID, proveedor, cuenta o UUID").strip()
-        matching = flags[selected].any(axis=1) if only else pd.Series(True, index=payments.index)
-        if query:
-            fields = payments[["INVOICE_ID", "VENDOR_ID", "VENDOR_NAME", "BANK_ACCOUNT_NUM", "UUID"]]
-            matching &= fields.apply(lambda col: col.str.contains(query, case=False, regex=False)).any(axis=1)
-        table = payments[matching].join(flags.rename(columns={k: v[0] for k, v in RULES.items()}))
-        table["Reglas de auditoría vinculadas al pago"] = [
-            ", ".join(row.index[row]) for _, row in audit_flags[matching].iterrows()]
-        st.metric("Pagos en la selección", len(table))
-        st.dataframe(table, hide_index=True)
-        download(table, "Descargar pagos seleccionados", "conciliacion.csv")
-        with st.expander("Consultas SQL"):
-            for label, sql in RULES.values():
-                st.markdown(f"**{label}**")
-                st.code(sql, language="sql")
     elif section == "Modelos de anomalías":
         show_ml(payments, flags)
     elif section == "Mapper":
-        show_mapper(run.id, payments, flags)
+        show_mapper(run, payments, audit_flags)
     else:
         show_geometry(run, payments, flags)

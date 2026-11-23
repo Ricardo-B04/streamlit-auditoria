@@ -214,8 +214,9 @@ def monthly_findings(rows_by_entity, rule, first_day, cutoff):
             if month - BASELINE_MONTHS < first_month:
                 continue
             baseline = [p for past in range(month - BASELINE_MONTHS, month) for p in buckets.get(past, ())]
-            average = sum((totals.get(past, Decimal(0)) for past in range(month - BASELINE_MONTHS, month))) / BASELINE_MONTHS
-            if average > 0 and totals[month] > AMOUNT_MULTIPLIER * average:
+            previous_total = sum(totals.get(past, Decimal(0)) for past in range(month - BASELINE_MONTHS, month))
+            if previous_total > 0 and totals[month] * BASELINE_MONTHS > AMOUNT_MULTIPLIER * previous_total:
+                average = previous_total / BASELINE_MONTHS
                 yield Finding(
                     rule, tuple(p["id"] for p in current),
                     f"{start:%m/%Y} · Pagado {money(totals[month])} · Promedio anterior {money(average)}",

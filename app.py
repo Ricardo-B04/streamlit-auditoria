@@ -106,7 +106,7 @@ def main():
     if message:
         st.success(message)
     st.caption(f"Datos simulados · Corte {run.end or 'sin pagos'} · {len(run.rules)} reglas · Ejecución {run.id[:12]}")
-    section = st.sidebar.radio("Área de trabajo", ["Auditoría", "Explorador SQL", "Modelos de anomalías", "Mapper", "Homología persistente", "Validación de casos"])
+    section = st.sidebar.radio("Área de trabajo", ["Auditoría", "Explorador SQL", "Mapper", "Homología persistente", "Validación de casos"])
     if section != "Auditoría":
         from analisis import show_analysis
         show_analysis(run, section)
@@ -152,27 +152,24 @@ def main():
 
     overview, explorer, catalog = st.tabs(["Resumen", "Explorar alertas", "Matriz de reglas"])
     with overview:
-        left, right = st.columns([3, 2])
-        with left:
-            st.subheader("Alertas por mes")
-            if run.start:
-                months = pd.period_range(dates[0], dates[1], freq="M")
-                st.line_chart(pd.Series(
-                    [monthly.get(month.start_time.date(), 0) for month in months],
-                    index=months.to_timestamp(), name="Alertas"), color="#137C72")
-            else:
-                st.caption("Sin pagos en el extracto.")
-        with right:
-            st.subheader("Alertas por categoría")
-            category_counts = {k: v for k, v in counts.items() if category is None or k == category}
-            st.bar_chart(pd.Series(category_counts, name="Alertas"), horizontal=True, color="#3982AA")
+        st.subheader("Alertas por mes")
+        if run.start:
+            months = pd.period_range(dates[0], dates[1], freq="M")
+            st.line_chart(pd.Series(
+                [monthly.get(month.start_time.date(), 0) for month in months],
+                index=months.to_timestamp(), name="Alertas"), color="#137C72")
+        else:
+            st.caption("Sin pagos en el extracto.")
+        st.subheader("Alertas por categoría")
+        category_counts = {k: v for k, v in counts.items() if category is None or k == category}
+        st.bar_chart(pd.Series(category_counts, name="Alertas"), horizontal=True, color="#3982AA")
 
         st.subheader("Reglas con más hallazgos")
         rule_counts = Counter(r["rule"] for r in rows)
         if rule_counts:
             st.dataframe([{"Regla": code, "Alerta": run.rules[code]["name"],
                            "Severidad": run.rules[code]["severity"], "Hallazgos": n}
-                          for code, n in rule_counts.most_common(8)], hide_index=True)
+                          for code, n in rule_counts.most_common()], hide_index=True, row_height=35, height=387)
         else:
             st.caption("Sin hallazgos para la selección.")
     with explorer:
@@ -201,10 +198,17 @@ def main():
                 show_detail(store, run, item, cases, vendors)
     with catalog:
         count_by_rule = Counter(r["rule"] for r in rows)
-        st.dataframe([{
+        matrix = pd.DataFrame([{
             "ID": key, "Alerta": r["name"], "Categoría": r["category"], "Severidad": r["severity"],
             "Coincidencias visibles": count_by_rule[key], "Regla funcional": r["criterion"],
-        } for key, r in sorted(run.rules.items())], hide_index=True)
+        } for key, r in sorted(run.rules.items())])
+        severity_styles = {
+            "Crítica": "background-color: #FDE2E2; color: #8B1D26",
+            "Alta": "background-color: #FFE8D2; color: #823800",
+            "Media/Alta": "background-color: #FFF1BE; color: #674A00",
+            "Media": "background-color: #DBEDF9; color: #174A70",
+        }
+        st.dataframe(matrix.style.map(severity_styles.get, subset=["Severidad"]), hide_index=True)
         with st.expander("Parámetros de esta ejecución"):
             st.json(run.metadata["parameters"], expanded=False)
 
