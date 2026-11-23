@@ -17,6 +17,14 @@ Abre [el dashboard local](http://127.0.0.1:8501). Usa los filtros laterales, sel
 
 Los indicadores de pagos e importe afectados cuentan cada pago una vez. El historial de comparación aparece en el detalle. Los importes están en unidades del extracto. Los parámetros de prueba se consultan en **Matriz de reglas**.
 
+## Despliegue en Railway
+
+El `Dockerfile` usa Python 3.12 y el puerto asignado por Railway. `railway.json` comprueba la salud de Streamlit antes de activar el despliegue.
+
+Adjunta un volumen en `/data` y configura `AUDIT_DB_PATH=/data/seguimiento.sqlite3` para conservar el seguimiento entre reinicios y despliegues. Mantén una sola réplica al utilizar SQLite. Los CSV simulados se distribuyen con el código. La base local no se sube: el seguimiento en la nube comienza vacío.
+
+La aplicación no incorpora inicio de sesión: cualquier persona con acceso a la URL puede consultar los datos simulados y modificar el seguimiento. Antes de utilizar datos reales, configura autenticación y copias de seguridad.
+
 ## Áreas de trabajo
 
 Todas las áreas leen la misma ejecución validada. Los filtros del área Auditoría sirven para revisar los hallazgos. Los modelos y la topología utilizan el extracto completo.

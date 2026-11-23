@@ -1,6 +1,7 @@
 """Panel local de auditoría de pagos."""
 from collections import Counter
 from pathlib import Path
+import os
 import sqlite3
 
 import pandas as pd
@@ -16,7 +17,7 @@ st.set_page_config(page_title="Auditoría de pagos", layout="wide")
 
 @st.cache_resource
 def get_store():
-    return AuditStore(Path(__file__).parent / "datos" / "seguimiento.sqlite3")
+    return AuditStore(Path(os.environ.get("AUDIT_DB_PATH", str(Path(__file__).parent / "datos" / "seguimiento.sqlite3"))))
 
 
 FILTERS = ("periodo", "sitio", "proveedor", "categoria", "regla", "severidad", "estado", "responsable")
