@@ -89,13 +89,13 @@ def geometry(payments, flags):
     return mass_scores(points), diagrams(points), diagrams(scaled_behavior(payments, reference).to_numpy())
 
 
-def show_geometry(run, payments, flags):
+def show_geometry(scope, payments, flags):
     st.subheader("Homología persistente")
     st.write("Compara los mismos pagos en dos representaciones. Una usa cuatro variables de comportamiento. La otra añade las cuatro señales SQL de Topo con peso 4.")
-    st.caption("H₀ describe componentes y H₁ ciclos. Los diagramas usan hasta 600 pagos representativos. El ranking H₀ usa todos los pagos y mide la distancia necesaria para alcanzar una componente con el 25 % del extracto.")
+    st.caption("H₀ describe componentes y H₁ ciclos. Los diagramas usan hasta 600 pagos representativos. El ranking H₀ usa todos los pagos y mide la distancia necesaria para alcanzar una componente con el 25 % de los pagos del periodo.")
     if st.button("Calcular homología persistente"):
-        st.session_state["geometria"] = run.id
-    if st.session_state.get("geometria") != run.id:
+        st.session_state["geometria"] = scope
+    if st.session_state.get("geometria") != scope:
         return
     scores, enriched, baseline = geometry(payments, flags)
     for dim, col in enumerate(st.columns(2)):
@@ -146,7 +146,7 @@ def sql_results(run_id, selected, _run):
     return execute_queries(_run.payments, _run.master, selected)
 
 
-def show_sql(run, payments):
+def show_sql(run, payments, period):
     st.subheader("Consultas de auditoría")
     def rule_label(code):
         return f"{code} · {run.rules[code]['name']}"
@@ -157,6 +157,9 @@ def show_sql(run, payments):
     query = st.text_input("Buscar ID, proveedor, cuenta o UUID").strip()
     only = st.checkbox("Solo registros con alguna regla seleccionada", True)
     matches = sql_results(run.id, tuple(selected), run)
+    if period and not period[0] <= run.end <= period[1] and "A21" in matches:
+        matches["A21"] = set()
+    st.caption("Las reglas se evalúan con el historial completo y los pagos se muestran según el periodo.")
     payment_rules = [code for code in selected if code not in MASTERS]
     master_rules = [code for code in selected if code in MASTERS]
     suppliers = pd.DataFrame([
@@ -169,7 +172,7 @@ def show_sql(run, payments):
         show_sql_table(payments, "INVOICE_ID", search_cols, payment_rules, matches,
                        query, only, "Pagos", "consultas_pagos.csv")
     with master_tab:
-        st.caption("A05, A16 y A21 identifican proveedores del maestro. A05 muestra cada proveedor de la cuenta compartida.")
+        st.caption("A05, A16 y A21 identifican proveedores del maestro. A05 y A16 carecen de fecha. A21 se muestra si el periodo incluye el corte del extracto.")
         show_sql_table(suppliers, "ID proveedor", ["ID proveedor", "Proveedor", "Cuenta"],
                        master_rules, matches, query, only, "Proveedores", "consultas_maestro.csv")
     with code_tab:
@@ -194,19 +197,24 @@ def show_sql_table(frame, id_column, search_cols, rules, matches, query, only, l
     download(table, f"Descargar {label.lower()}", filename)
 
 
-def show_analysis(run, section):
+def show_analysis(run, section, period):
     if section == "Validación de casos":
+        st.caption("La validación comprueba los casos documentados del extracto completo.")
         validation(run)
         return
     payments, audit_flags, flags = extract(run.id, run)
-    st.caption(f"Análisis sobre el extracto completo · {len(payments):,} pagos")
+    scope = (run.id, *period)
+    if period:
+        start, end = period
+        mask = payments["INVOICE_ID"].map(lambda key: start <= run.payments[key]["paid_on"] <= end)
+        payments, audit_flags, flags = (frame.loc[mask].reset_index(drop=True)
+                                        for frame in (payments, audit_flags, flags))
+        st.caption(f"{start:%d/%m/%Y} al {end:%d/%m/%Y} · {len(payments):,} pagos del periodo")
     if section == "Explorador SQL":
-        show_sql(run, payments)
+        show_sql(run, payments, period)
     elif payments.empty:
-        st.info("La ejecución no contiene pagos.")
-    elif section == "Modelos de anomalías":
-        show_ml(payments, flags)
+        st.info("No hay pagos en el periodo seleccionado.")
     elif section == "Mapper":
-        show_mapper(run, payments, audit_flags)
+        show_mapper(run, payments, audit_flags, scope)
     else:
-        show_geometry(run, payments, flags)
+        show_geometry(scope, payments, flags)

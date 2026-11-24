@@ -34,7 +34,7 @@ def mapper_figure(summary, edges):
         customdata=summary[['Pagos', 'Marcados', 'Tasa', 'Diferencia (pp)', 'Límite inferior', 'Límite superior']],
         hovertemplate=('<b>%{text}</b><br>Intervalo %{x}<br>Pagos: %{customdata[0]}'
                        '<br>Marcados: %{customdata[1]} (%{customdata[2]:.1%})'
-                       '<br>Frente al extracto: %{customdata[3]:+.2f} pp'
+                       '<br>Frente al periodo: %{customdata[3]:+.2f} pp'
                        '<br>Rango de la lente: [%{customdata[4]:.2f}, %{customdata[5]:.2f}]'
                        '<extra></extra>'),
         marker=dict(size=9 + 27 * np.sqrt(counts / counts.max()),
@@ -49,12 +49,11 @@ def mapper_figure(summary, edges):
     return fig
 
 
-def show_mapper(run, payments, flags):
-    case = run.id
+def show_mapper(run, payments, flags, scope):
     st.subheader('Mapa de pagos')
     st.write('Cada nodo agrupa pagos de comportamiento similar dentro de un intervalo de la lente. '
              'Dos nodos se conectan si comparten al menos un pago.')
-    st.caption('Las cuatro variables de comportamiento se escalan con el extracto completo. '
+    st.caption('Las cuatro variables de comportamiento se escalan con los pagos del periodo. '
                'Las alertas de auditoría colorean los nodos después de agrupar los pagos.')
     if payments.empty:
         st.info('Se necesitan pagos en el extracto para construir el mapa.')
@@ -64,9 +63,9 @@ def show_mapper(run, payments, flags):
               'Días factura a vencimiento']
     settings = st.session_state.setdefault('mapper_settings_by_case', {})
     saved_lens, saved_intervals, saved_overlap, saved_eps, saved_min_samples = settings.get(
-        case, (lenses[0], 8, 35, 0.8, 5)
+        scope, (lenses[0], 8, 35, 0.8, 5)
     )
-    with st.form(f'mapper_settings_{case}'):
+    with st.form(f'mapper_settings_{scope}'):
         lens = st.selectbox('Lente de Mapper', lenses, index=lenses.index(saved_lens))
         a, b = st.columns(2)
         intervals = a.slider('Intervalos de la lente', 2, 20, saved_intervals)
@@ -74,15 +73,15 @@ def show_mapper(run, payments, flags):
         eps = a.slider('Radio de DBSCAN (ε)', 0.1, 4.0, saved_eps, step=0.1)
         min_samples = b.slider('Mínimo de pagos en la vecindad', 2, 30, saved_min_samples)
         submitted = st.form_submit_button('Construir mapa')
-    node_key = f'mapper_node_{case}'
+    node_key = f'mapper_node_{scope}'
     if submitted:
-        settings[case] = (lens, intervals, overlap, eps, min_samples)
+        settings[scope] = (lens, intervals, overlap, eps, min_samples)
         st.session_state.pop(node_key, None)
-    if case not in settings:
+    if scope not in settings:
         return
 
     with st.spinner('Construyendo el grafo de Mapper…'):
-        nodes, edges, covered = case_mapper(payments, *settings[case])
+        nodes, edges, covered = case_mapper(payments, *settings[scope])
 
     show_map_results(run, payments, flags, nodes, edges, covered, node_key)
 
@@ -114,7 +113,7 @@ def show_map_results(run, payments, flags, nodes, edges, covered, node_key):
         st.caption('El color indica pagos vinculados directamente a hallazgos. '
                    'Los pagos del historial de comparación quedan fuera del conteo.')
     baseline = alert.mean()
-    overview.metric('Referencia del extracto', f'{baseline:.2%}',
+    overview.metric('Referencia del periodo', f'{baseline:.2%}',
                     help=f'{alert.sum():,} de {len(payments):,} pagos únicos marcados')
 
     metrics = st.columns(3)
@@ -151,7 +150,7 @@ def show_map_results(run, payments, flags, nodes, edges, covered, node_key):
     cols = st.columns(3)
     cols[0].metric('Pagos en el grupo', len(rows))
     cols[1].metric('Pagos marcados', f'{affected.sum():,} / {len(rows):,}')
-    cols[2].metric('Tasa del grupo', f'{rate:.2%}', f'{100 * (rate - baseline):+.2f} pp frente al extracto',
+    cols[2].metric('Tasa del grupo', f'{rate:.2%}', f'{100 * (rate - baseline):+.2f} pp frente al periodo',
                    delta_color='off')
     if selected == 'Pagos sin nodo':
         st.caption('Pagos que DBSCAN no agrupó con los parámetros seleccionados.')

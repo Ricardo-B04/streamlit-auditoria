@@ -1,5 +1,6 @@
 """Panel local de auditoría de pagos."""
 from collections import Counter
+from statistics import median
 from pathlib import Path
 import os
 import sqlite3
@@ -8,7 +9,7 @@ import pandas as pd
 import streamlit as st
 
 from auditoria import money
-from reporte import report, vendor_options
+from reporte import matches, report, vendor_options
 from seguimiento import AuditStore, ConflictError, DEFAULT_CASE, STATES
 from validacion import DataValidationError
 
@@ -20,7 +21,7 @@ def get_store():
     return AuditStore(Path(os.environ.get("AUDIT_DB_PATH", str(Path(__file__).parent / "datos" / "seguimiento.sqlite3"))))
 
 
-FILTERS = ("periodo", "sitio", "proveedor", "categoria", "regla", "severidad", "estado", "responsable")
+FILTERS = ("periodo", "sitio", "proveedor", "categoria", "regla", "severidad", "estado", "responsable", "mes_auditoria", "modo_periodo")
 COLUMNS = {
     "rule": "Regla", "date": "Fecha", "severity": "Severidad", "site": "Sitio",
     "vendor": "Proveedor", "amount": "Importe afectado", "status": "Estado",
@@ -41,8 +42,8 @@ def payment_table(run, ids):
     } for p in rows], hide_index=True)
 
 
-def follow_up(store, run, item, case):
-    with st.form(f"seguimiento-{item.id}-{case['revision']}"):
+def follow_up(store, run, item, case, scope):
+    with st.form(f"seguimiento-{scope}-{item.id}-{case['revision']}"):
         owner = st.text_input("Responsable", value=case["owner"], max_chars=120)
         status = st.selectbox("Estado del caso", STATES, index=STATES.index(case["status"]))
         resolution = st.text_area("Resolución", value=case["resolution"], max_chars=4000)
@@ -68,7 +69,7 @@ def follow_up(store, run, item, case):
             st.caption("Sin cambios registrados.")
 
 
-def show_detail(store, run, item, cases, vendors):
+def show_detail(store, run, item, cases, vendors, scope="explorador"):
     rule = run.rules[item.rule]
     st.subheader(f"{item.rule} · {rule['name']}")
     st.text(rule["criterion"])
@@ -85,7 +86,99 @@ def show_detail(store, run, item, cases, vendors):
     if item.context_ids:
         with st.expander(f"Historial de comparación · {len(item.context_ids)} pagos"):
             payment_table(run, item.context_ids)
-    follow_up(store, run, item, cases.get(item.id, DEFAULT_CASE))
+    follow_up(store, run, item, cases.get(item.id, DEFAULT_CASE), scope)
+
+
+MONTH_NAMES = (
+    "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
+    "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre",
+)
+
+
+def month_label(month):
+    return f"{MONTH_NAMES[month.month - 1]} {month.year}"
+
+
+def show_monthly(store, run, cases, vendors, filters, month, period):
+    first, last = month.start_time.date(), month.end_time.date()
+    begin, finish = period
+    previous = month - 1
+    prior_finish = previous.end_time.date()
+    prior_begin = prior_finish.replace(day=begin.day) if begin.day <= prior_finish.day else None
+    partial = (begin, finish) != (first, last)
+    if partial:
+        prior_finish = prior_finish.replace(day=min(finish.day, prior_finish.day))
+    comparable = prior_begin is not None and run.start <= prior_begin <= prior_finish
+    st.caption(f"{'Mes parcial · ' if partial else ''}{begin:%d/%m/%Y} al {finish:%d/%m/%Y}. "
+               "Se aplican los filtros laterales de Auditoría.")
+    if comparable:
+        st.caption(f"Periodo de comparación · {prior_begin:%d/%m/%Y} al {prior_finish:%d/%m/%Y}")
+    else:
+        st.caption("El extracto no cubre el periodo comparable del mes anterior.")
+
+    def metrics_for(start, end):
+        rows, _, _, payments, affected, _, _ = report(run, cases, start.isoformat(), end.isoformat(), **filters)
+        dated = [row for row in rows if row["date"]]
+        return rows, dated, (payments, len(dated), affected, 100 * affected / payments if payments else None)
+
+    rows, dated, current = metrics_for(begin, finish)
+    _, previous_rows, past = metrics_for(prior_begin, prior_finish) if comparable else ([], [], (None,) * 4)
+    labels = ("Pagos del mes", "Hallazgos del mes", "Pagos afectados", "Tasa de afectación")
+    for index, (col, label, value, prior) in enumerate(zip(st.columns(4), labels, current, past)):
+        rate = index == 3
+        displayed = "—" if value is None else (f"{value:.1f}%" if rate else f"{value:,}")
+        delta = None if value is None or prior is None else (f"{value - prior:+.1f} pp" if rate else f"{value - prior:+,}")
+        col.metric(label, displayed, delta, delta_color="off", border=True)
+
+    population = [p for p in run.payments.values() if matches(p, begin, finish, filters["site"], filters["vendor"])]
+    late = [(p["paid_on"] - p["due_on"]).days for p in population if p["due_on"] and p["paid_on"] > p["due_on"]]
+    if population:
+        delay = f" Mediana de atraso: {median(late):g} días." if late else ""
+        st.caption(f"Pagos tardíos · {len(late):,} de {len(population):,} ({len(late) / len(population):.1%})." + delay)
+
+    st.subheader("Hallazgos por regla")
+    st.caption("Un caso agrupado aparece en cada mes con pagos vinculados. Los hallazgos del maestro con fecha se cuentan en su mes de registro.")
+    current_counts = Counter(row["rule"] for row in dated)
+    past_counts = Counter(row["rule"] for row in previous_rows)
+    codes = sorted(current_counts.keys() | past_counts.keys(), key=lambda code: (-current_counts[code], code))
+    if codes:
+        st.dataframe([{
+            "Regla": code, "Alerta": run.rules[code]["name"], "Categoría": run.rules[code]["category"],
+            "Este mes": current_counts[code], "Mes anterior": past_counts[code] if comparable else None,
+            "Variación": current_counts[code] - past_counts[code] if comparable else None,
+        } for code in codes], hide_index=True)
+    else:
+        st.info("No hay hallazgos fechados para los filtros y periodos seleccionados.")
+
+    if codes:
+        by_category = Counter(run.rules[row["rule"]]["category"] for row in dated)
+        prior_categories = Counter(run.rules[row["rule"]]["category"] for row in previous_rows)
+        with st.expander("Comparar por categoría"):
+            st.dataframe([{
+                "Categoría": name, "Este mes": by_category[name],
+                "Mes anterior": prior_categories[name] if comparable else None,
+                "Variación": by_category[name] - prior_categories[name] if comparable else None,
+            } for name in sorted(by_category.keys() | prior_categories.keys())], hide_index=True)
+
+    undated = [row for row in rows if not row["date"]]
+    if undated:
+        with st.expander(f"Hallazgos del maestro sin fecha · {len(undated):,}"):
+            st.dataframe([{"Regla": row["rule"], "Proveedor": row["vendor"], "Evidencia": row["evidence"]}
+                          for row in undated], hide_index=True)
+
+    if rows:
+        visible = sorted({row["rule"] for row in rows})
+        rule = st.selectbox("Regla para revisar casos", [None, *visible], key="regla_mensual",
+                            format_func=lambda code: f"{code} · {run.rules[code]['name']}" if code else "Todas")
+        options = {row["id"]: row for row in rows if rule is None or row["rule"] == rule}
+        case = st.selectbox("Caso para revisar", [None, *options], key="caso_mensual",
+                            format_func=lambda key: (
+                                f"{options[key]['rule']} · {options[key]['date'] or 'Sin fecha'} · "
+                                f"{options[key]['vendor']} · {key[-8:]}" if key else "Selecciona un caso"
+                            ))
+        if case:
+            item = next(item for item in run.findings if item.id == case)
+            show_detail(store, run, item, cases, vendors, scope="mensual")
 
 
 def main():
@@ -107,11 +200,6 @@ def main():
     if message:
         st.success(message)
     st.caption(f"Datos simulados · Corte {run.end or 'sin pagos'} · {len(run.rules)} reglas · Ejecución {run.id[:12]}")
-    section = st.sidebar.radio("Área de trabajo", ["Auditoría", "Explorador SQL", "Mapper", "Homología persistente", "Validación de casos"])
-    if section != "Auditoría":
-        from analisis import show_analysis
-        show_analysis(run, section)
-        return
     vendors = vendor_options(run)
     cases = store.cases()
     sites = sorted({r["site"] for r in (*run.payments.values(), *run.master.values())} - {""})
@@ -119,10 +207,20 @@ def main():
     severities = sorted({r["severity"] for r in run.rules.values()})
 
     with st.sidebar:
-        st.header("Filtros")
+        st.header("Periodo y filtros")
         st.button("Limpiar filtros", on_click=clear_filters)
-        period = st.date_input("Periodo de pago", (run.start, run.end), min_value=run.start,
-                               max_value=run.end, key="periodo") if run.start else ()
+        month = None
+        period = ()
+        if run.start:
+            mode = st.radio("Modo de periodo", ["Selección libre", "Mes a mes"], key="modo_periodo")
+            if mode == "Mes a mes":
+                months = list(pd.period_range(run.start, run.end, freq="M"))[::-1]
+                month = st.selectbox("Mes de análisis", months, key="mes_auditoria", format_func=month_label)
+                period = (max(run.start, month.start_time.date()), min(run.end, month.end_time.date()))
+            else:
+                period = st.date_input("Periodo de pago", (run.start, run.end), min_value=run.start,
+                                       max_value=run.end, key="periodo")
+        st.caption("Los filtros siguientes se aplican a Auditoría.")
         site = st.selectbox("Sitio", [None, *sites], format_func=lambda x: x or "Todos", key="sitio")
         vendor = st.selectbox("Proveedor", [None, *sorted(vendors, key=vendors.get)],
                               format_func=lambda x: vendors.get(x, "Todos"), key="proveedor")
@@ -151,16 +249,22 @@ def main():
             col.metric(label, value, border=True)
     st.caption("Importes en unidades del extracto. Cada pago afectado aporta una sola vez al total.")
 
-    overview, explorer, catalog = st.tabs(["Resumen", "Explorar alertas", "Matriz de reglas"])
+    tab_names = ["Resumen", "Explorar alertas", "Matriz de reglas", "Explorador SQL",
+                 "Mapper", "Homología persistente", "Validación de casos"]
+    if month is not None:
+        tab_names.insert(1, "Vista mensual")
+    tabs = dict(zip(tab_names, st.tabs(tab_names)))
+    overview, explorer, catalog = (tabs[name] for name in ("Resumen", "Explorar alertas", "Matriz de reglas"))
     with overview:
-        st.subheader("Alertas por mes")
-        if run.start:
-            months = pd.period_range(dates[0], dates[1], freq="M")
-            st.line_chart(pd.Series(
-                [monthly.get(month.start_time.date(), 0) for month in months],
-                index=months.to_timestamp(), name="Alertas"), color="#137C72")
-        else:
-            st.caption("Sin pagos en el extracto.")
+        if month is None:
+            st.subheader("Alertas por mes")
+            if run.start:
+                months = pd.period_range(dates[0], dates[1], freq="M")
+                st.line_chart(pd.Series(
+                    [monthly.get(month.start_time.date(), 0) for month in months],
+                    index=months.to_timestamp(), name="Alertas"), color="#137C72")
+            else:
+                st.caption("Sin pagos en el extracto.")
         st.subheader("Alertas por categoría")
         category_counts = {k: v for k, v in counts.items() if category is None or k == category}
         st.bar_chart(pd.Series(category_counts, name="Alertas"), horizontal=True, color="#3982AA")
@@ -173,6 +277,12 @@ def main():
                           for code, n in rule_counts.most_common()], hide_index=True, row_height=35, height=387)
         else:
             st.caption("Sin hallazgos para la selección.")
+    if month is not None:
+        with tabs["Vista mensual"]:
+            show_monthly(store, run, cases, vendors, dict(
+                site=site, vendor=vendor, severity=severity, rule=rule, category=category,
+                case_status=status, case_owner=owner,
+            ), month, period)
     with explorer:
         if not rows:
             st.info("No hay alertas con los filtros seleccionados.")
@@ -212,6 +322,11 @@ def main():
         st.dataframe(matrix.style.map(severity_styles.get, subset=["Severidad"]), hide_index=True)
         with st.expander("Parámetros de esta ejecución"):
             st.json(run.metadata["parameters"], expanded=False)
+
+    from analisis import show_analysis
+    for section in ("Explorador SQL", "Mapper", "Homología persistente", "Validación de casos"):
+        with tabs[section]:
+            show_analysis(run, section, period)
 
 
 main()

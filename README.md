@@ -27,7 +27,7 @@ La aplicación no incorpora inicio de sesión: cualquier persona con acceso a la
 
 ## Áreas de trabajo
 
-Todas las áreas leen la misma ejecución validada. Los filtros del área Auditoría sirven para revisar los hallazgos. Los modelos y la topología utilizan el extracto completo.
+El selector lateral define el periodo de Auditoría, Explorador SQL, Mapper y Homología persistente. Las reglas se evalúan con el historial completo y sus resultados se acotan al periodo. Mapper y Homología calculan sobre los pagos seleccionados. Validación de casos comprueba el inventario completo del extracto.
 
 | Área | Qué se puede revisar |
 | --- | --- |
