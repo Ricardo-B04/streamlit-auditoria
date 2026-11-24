@@ -47,7 +47,7 @@ def follow_up(store, run, item, case, scope):
         owner = st.text_input("Responsable", value=case["owner"], max_chars=120)
         status = st.selectbox("Estado del caso", STATES, index=STATES.index(case["status"]))
         resolution = st.text_area("Resolución", value=case["resolution"], max_chars=4000)
-        if st.form_submit_button("Guardar seguimiento"):
+        if st.form_submit_button("Guardar seguimiento", icon=":material/save:"):
             try:
                 store.save_case(run.id, item.id, owner, status, resolution, case["revision"])
             except ConflictError as error:
@@ -181,10 +181,14 @@ def show_monthly(store, run, cases, vendors, filters, month, period):
             show_detail(store, run, item, cases, vendors, scope="mensual")
 
 
+def request_refresh():
+    st.session_state["actualizar_datos"] = True
+
+
 def main():
     store = get_store()
     st.title("Auditoría de pagos")
-    refresh = st.sidebar.button("Actualizar datos")
+    refresh = st.session_state.pop("actualizar_datos", False)
     if refresh or "run_id" not in st.session_state:
         try:
             run = store.refresh()
@@ -194,6 +198,7 @@ def main():
         except (OSError, sqlite3.Error, DataValidationError) as error:
             st.error(f"Error al cargar el extracto. {error}")
     if "run_id" not in st.session_state:
+        st.sidebar.button("Actualizar datos", width="stretch", on_click=request_refresh, icon=":material/refresh:")
         st.stop()
     run = store.get_run(st.session_state["run_id"])
     message = st.session_state.pop("mensaje", None)
@@ -207,29 +212,39 @@ def main():
     severities = sorted({r["severity"] for r in run.rules.values()})
 
     with st.sidebar:
-        st.header("Periodo y filtros")
-        st.button("Limpiar filtros", on_click=clear_filters)
-        month = None
-        period = ()
-        if run.start:
-            mode = st.radio("Modo de periodo", ["Selección libre", "Mes a mes"], key="modo_periodo")
-            if mode == "Mes a mes":
-                months = list(pd.period_range(run.start, run.end, freq="M"))[::-1]
-                month = st.selectbox("Mes de análisis", months, key="mes_auditoria", format_func=month_label)
-                period = (max(run.start, month.start_time.date()), min(run.end, month.end_time.date()))
-            else:
-                period = st.date_input("Periodo de pago", (run.start, run.end), min_value=run.start,
-                                       max_value=run.end, key="periodo")
-        st.caption("Los filtros siguientes se aplican a Auditoría.")
-        site = st.selectbox("Sitio", [None, *sites], format_func=lambda x: x or "Todos", key="sitio")
-        vendor = st.selectbox("Proveedor", [None, *sorted(vendors, key=vendors.get)],
-                              format_func=lambda x: vendors.get(x, "Todos"), key="proveedor")
-        category = st.selectbox("Categoría", [None, *categories], format_func=lambda x: x or "Todas", key="categoria")
-        rule = st.selectbox("Regla", [None, *sorted(run.rules)], key="regla",
-                            format_func=lambda x: f"{x} · {run.rules[x]['name']}" if x else "Todas")
-        severity = st.selectbox("Severidad", [None, *severities], format_func=lambda x: x or "Todas", key="severidad")
-        status = st.selectbox("Estado", [None, *STATES], format_func=lambda x: x or "Todos", key="estado")
-        owner = st.text_input("Responsable", key="responsable")
+        st.html("""
+            <div style="border-left: 4px solid #EF5660; padding: 0.35rem 0 0.35rem 0.85rem; margin-bottom: 0.85rem">
+                <div style="font-size: 1.8rem; font-weight: 800; letter-spacing: 0.08em; line-height: 1.15">Anomalía 27</div>
+                <div style="font-size: 0.9rem">Auditoría de pagos</div>
+            </div>
+        """)
+        with st.expander("Periodo y filtros", expanded=False, icon=":material/filter_alt:"):
+            month = None
+            period = ()
+            if run.start:
+                mode = st.segmented_control(
+                    "Modo de periodo", ["Mes a mes", "Selección libre"], default="Selección libre",
+                    required=True, width="stretch", key="modo_periodo",
+                )
+                if mode == "Mes a mes":
+                    months = list(pd.period_range(run.start, run.end, freq="M"))[::-1]
+                    month = st.selectbox("Mes de análisis", months, key="mes_auditoria", format_func=month_label)
+                    period = (max(run.start, month.start_time.date()), min(run.end, month.end_time.date()))
+                else:
+                    period = st.date_input("Periodo de pago", (run.start, run.end), min_value=run.start,
+                                           max_value=run.end, key="periodo")
+            st.caption("Los filtros siguientes se aplican a Auditoría.")
+            site = st.selectbox("Sitio", [None, *sites], format_func=lambda x: x or "Todos", key="sitio")
+            vendor = st.selectbox("Proveedor", [None, *sorted(vendors, key=vendors.get)],
+                                  format_func=lambda x: vendors.get(x, "Todos"), key="proveedor")
+            category = st.selectbox("Categoría", [None, *categories], format_func=lambda x: x or "Todas", key="categoria")
+            rule = st.selectbox("Regla", [None, *sorted(run.rules)], key="regla",
+                                format_func=lambda x: f"{x} · {run.rules[x]['name']}" if x else "Todas")
+            severity = st.selectbox("Severidad", [None, *severities], format_func=lambda x: x or "Todas", key="severidad")
+            status = st.selectbox("Estado", [None, *STATES], format_func=lambda x: x or "Todos", key="estado")
+            owner = st.text_input("Responsable", key="responsable")
+            st.button("Limpiar filtros", on_click=clear_filters, width="stretch", icon=":material/filter_alt_off:")
+        st.button("Actualizar datos", on_click=request_refresh, width="stretch", icon=":material/refresh:")
 
     if run.start and len(period) != 2:
         st.info("Selecciona el inicio y el fin del periodo.")
@@ -253,7 +268,13 @@ def main():
                  "Mapper", "Homología persistente", "Validación de casos"]
     if month is not None:
         tab_names.insert(1, "Vista mensual")
-    tabs = dict(zip(tab_names, st.tabs(tab_names)))
+    tab_icons = {
+        "Resumen": "dashboard", "Vista mensual": "calendar_month", "Explorar alertas": "search",
+        "Matriz de reglas": "table_chart", "Explorador SQL": "database", "Mapper": "hub",
+        "Homología persistente": "scatter_plot", "Validación de casos": "fact_check",
+    }
+    labels = [f":material/{tab_icons[name]}: {name}" for name in tab_names]
+    tabs = dict(zip(tab_names, st.tabs(labels)))
     overview, explorer, catalog = (tabs[name] for name in ("Resumen", "Explorar alertas", "Matriz de reglas"))
     with overview:
         if month is None:
@@ -294,7 +315,7 @@ def main():
             rows.sort(key=lambda r: (order_key(r), r["id"]), reverse=True)
             exported = pd.DataFrame(rows).rename(columns=COLUMNS)
             st.download_button("Descargar alertas filtradas", exported.to_csv(index=False).encode("utf-8-sig"),
-                               "alertas_filtradas.csv", "text/csv")
+                               "alertas_filtradas.csv", "text/csv", icon=":material/download:")
             page = st.number_input("Página", min_value=1, max_value=(len(rows) + 24) // 25, step=1)
             page_rows = rows[(page - 1) * 25:page * 25]
             index = {r["id"]: r for r in page_rows}

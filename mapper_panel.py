@@ -72,7 +72,7 @@ def show_mapper(run, payments, flags, scope):
         overlap = b.slider('Solapamiento (%)', 0, 70, saved_overlap, step=5)
         eps = a.slider('Radio de DBSCAN (ε)', 0.1, 4.0, saved_eps, step=0.1)
         min_samples = b.slider('Mínimo de pagos en la vecindad', 2, 30, saved_min_samples)
-        submitted = st.form_submit_button('Construir mapa')
+        submitted = st.form_submit_button('Construir mapa', type='primary', width='stretch', icon=':material/hub:')
     node_key = f'mapper_node_{scope}'
     if submitted:
         settings[scope] = (lens, intervals, overlap, eps, min_samples)
@@ -197,7 +197,7 @@ def show_group_profile(run, group, direct, context, affected):
     detail['Reglas del maestro · contexto'] = rule_codes(context)
     st.dataframe(detail, hide_index=True)
     st.download_button('Descargar pagos del grupo', detail.to_csv(index=False).encode('utf-8-sig'),
-                       'mapper_pagos.csv', 'text/csv')
+                       'mapper_pagos.csv', 'text/csv', icon=':material/download:')
 
 
 def show_group_findings(run, group, rule):

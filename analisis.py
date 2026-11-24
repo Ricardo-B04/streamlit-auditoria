@@ -31,7 +31,7 @@ def extract(run_id, _run):
 
 
 def download(frame, label, filename):
-    st.download_button(label, frame.to_csv(index=False).encode("utf-8-sig"), filename, "text/csv")
+    st.download_button(label, frame.to_csv(index=False).encode("utf-8-sig"), filename, "text/csv", icon=":material/download:")
 
 
 @st.cache_data(max_entries=6)
@@ -50,7 +50,7 @@ def show_ml(payments, flags):
         profile = st.selectbox("Variables del modelo", PROFILES)
         budget = st.slider("Presupuesto de revisión (%)", 1, 100, 10)
         neighbors = st.number_input("Vecinos de LOF", 1, len(payments)-1, min(35, len(payments)-1))
-        st.form_submit_button("Aplicar configuración")
+        st.form_submit_button("Aplicar configuración", icon=":material/tune:")
     results = models(payments, flags, profile, budget, neighbors)
     summary = []
     for name, (scores, _, elapsed) in results.items():
@@ -93,7 +93,7 @@ def show_geometry(scope, payments, flags):
     st.subheader("Homología persistente")
     st.write("Compara los mismos pagos en dos representaciones. Una usa cuatro variables de comportamiento. La otra añade las cuatro señales SQL de Topo con peso 4.")
     st.caption("H₀ describe componentes y H₁ ciclos. Los diagramas usan hasta 600 pagos representativos. El ranking H₀ usa todos los pagos y mide la distancia necesaria para alcanzar una componente con el 25 % de los pagos del periodo.")
-    if st.button("Calcular homología persistente"):
+    if st.button("Calcular homología persistente", type="primary", width="stretch", icon=":material/calculate:"):
         st.session_state["geometria"] = scope
     if st.session_state.get("geometria") != scope:
         return
@@ -167,7 +167,9 @@ def show_sql(run, payments, period):
         for vid, row in run.master.items()
     ], columns=["ID proveedor", "Proveedor", "Sitio", "Cuenta"])
     search_cols = ["INVOICE_ID", "VENDOR_ID", "VENDOR_NAME", "BANK_ACCOUNT_NUM", "UUID"]
-    pay_tab, master_tab, code_tab = st.tabs(["Pagos", "Maestro de proveedores", "Consultas SQL"])
+    pay_tab, master_tab, code_tab = st.tabs([
+        ":material/payments: Pagos", ":material/groups: Maestro de proveedores", ":material/code: Consultas SQL",
+    ])
     with pay_tab:
         show_sql_table(payments, "INVOICE_ID", search_cols, payment_rules, matches,
                        query, only, "Pagos", "consultas_pagos.csv")
